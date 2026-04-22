@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Data & Models
+data/*
+!data/.gitkeep
+models/*
+!models/emotion_model.pth
+
+# OS
+.DS_Store
+Thumbs.db
