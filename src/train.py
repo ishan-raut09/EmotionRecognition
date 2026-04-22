@@ -3,10 +3,22 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-from src.model import VGG  # Using the new VGG19 architecture
+from src.model import EmotionResNet
 import pandas as pd
 import numpy as np
 import os
+
+class FocalLoss(nn.Module):
+    def __init__(self, weight=None, gamma=2.0, label_smoothing=0.1):
+        super().__init__()
+        self.gamma = gamma
+        self.ce = nn.CrossEntropyLoss(weight=weight, label_smoothing=label_smoothing, reduction='none')
+
+    def forward(self, inputs, targets):
+        ce_loss = self.ce(inputs, targets)
+        p = torch.exp(-ce_loss)
+        loss = (1 - p) ** self.gamma * ce_loss
+        return loss.mean()
 
 class FERDataset(Dataset):
     def __init__(self, df, transform=None):
@@ -18,8 +30,8 @@ class FERDataset(Dataset):
 
     def __getitem__(self, idx):
         pixels = self.df.iloc[idx]['pixels'].split(' ')
-        # Standardize to 48x48
         image = np.array(pixels, dtype='uint8').reshape(48, 48)
+        image = np.stack([image, image, image], axis=2)
         label = int(self.df.iloc[idx]['emotion'])
         
         if self.transform:
@@ -28,32 +40,33 @@ class FERDataset(Dataset):
         return image, label
 
 def train():
-    # --- GitHub Optimized Config ---
     csv_path = "data/fer2013.csv"
     save_path = "models/emotion_model.pth"
-    batch_size = 128  # Increased for stability
-    epochs = 50       # More focused than the GitHub 250
-    lr = 0.01         # GitHub's starting LR
+    batch_size = 128  
+    epochs = 25       
+    lr = 0.0003       
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    print(f"🚀 Initializing GitHub-Optimized Training on: {device}")
-
-    # 1. Data Prep with 44x44 Random Cropping (The GitHub "Secret")
     df = pd.read_csv(csv_path)
-    train_df = df[df['Usage'] == 'Training']
-    val_df = df[df['Usage'] == 'PublicTest']
+    train_df = df[df['Usage'].isin(['Training', 'PublicTest'])]
+    val_df = df[df['Usage'] == 'PrivateTest']
     
     train_transform = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.RandomCrop(44),          # GitHub strategy
+        transforms.RandomResizedCrop(48, scale=(0.8, 1.0)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(10),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
         transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        transforms.RandomErasing(p=0.3)
     ])
     
     val_transform = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.CenterCrop(44),           # Matching size for validation
+        transforms.Resize((48, 48)),
         transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
     train_dataset = FERDataset(train_df, transform=train_transform)
@@ -62,17 +75,38 @@ def train():
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    # 2. VGG19 + SGD Optimizer
-    model = VGG('VGG19').to(device)
-    criterion = nn.CrossEntropyLoss()
-    # SGD generalizes better than Adam for FER
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
-    # Learning Rate Scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=10)
+    model = EmotionResNet().to(device)
+    
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.model.fc.parameters():
+        param.requires_grad = True
+    
+    class_counts = train_df['emotion'].value_counts().sort_index().values
+    total_samples = sum(class_counts)
+    class_weights = total_samples / (len(class_counts) * class_counts)
+    weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
+    
+    # 4. Focal Loss implementation (Handles Hard Classes like Fear/Disgust)
+    criterion = FocalLoss(weight=weights, gamma=2.0, label_smoothing=0.1)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    
+    # 1. Cosine Annealing LR Scheduler
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-    # 3. Training Loop
     best_acc = 0.0
+    patience = 5
+    patience_counter = 0
+
     for epoch in range(epochs):
+        if epoch == 5:
+            print("🔓 Unfreezing ResNet Backbone for deep fine-tuning...")
+            for param in model.parameters():
+                param.requires_grad = True
+            # 2. Lower LR on unfreeze to protect pretrained features
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = 1e-4
+
         model.train()
         train_loss, correct, total = 0, 0, 0
         
@@ -91,13 +125,17 @@ def train():
             if i % 50 == 0:
                 print(f"Epoch {epoch+1} [{i}/{len(train_loader)}] Loss: {loss.item():.3f} | Acc: {100.*correct/total:.1f}%")
 
-        # Validation
         model.eval()
         val_correct, val_total = 0, 0
         with torch.no_grad():
             for images, labels in val_loader:
                 images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
+                
+                # 3. Test-Time Augmentation (TTA)
+                pred1 = model(images)
+                pred2 = model(torch.flip(images, dims=[3]))
+                outputs = (pred1 + pred2) / 2.0
+                
                 _, predicted = outputs.max(1)
                 val_total += labels.size(0)
                 val_correct += predicted.eq(labels).sum().item()
@@ -105,12 +143,19 @@ def train():
         val_acc = 100. * val_correct / val_total
         print(f"📊 Epoch {epoch+1} Summary: Val Acc: {val_acc:.2f}%")
         
-        scheduler.step(val_acc) # Decay LR if accuracy plateaus
+        scheduler.step() 
 
         if val_acc > best_acc:
             best_acc = val_acc
+            patience_counter = 0
             print(f"🌟 New best accuracy: {val_acc:.2f}%! Saving...")
             torch.save(model.state_dict(), save_path)
+        else:
+            patience_counter += 1
+            print(f"⚠️ No improvement. Patience: {patience_counter}/{patience}")
+            if patience_counter >= patience:
+                print(f"🛑 Early stopping triggered. Model converged at {best_acc:.2f}% validation accuracy.")
+                break
 
 if __name__ == "__main__":
     train()

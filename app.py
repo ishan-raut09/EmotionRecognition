@@ -3,12 +3,20 @@ import cv2
 import numpy as np
 from PIL import Image
 import torch
-from src.model import VGG
+from src.model import EmotionResNet
 from src.utils import FaceDetector, preprocess_face, get_emotion_label
 import time
 import os
 import psutil
 from datetime import datetime
+
+try:
+    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+    import av
+    WEBRTC_AVAILABLE = True
+except ImportError:
+    WEBRTC_AVAILABLE = False
+
 
 # --- Page Config ---
 if 'start_time' not in st.session_state:
@@ -47,7 +55,7 @@ def load_vgg_engine():
     model_path = "models/emotion_model.pth"
     if os.path.exists(model_path):
         try:
-            model = VGG('VGG19')
+            model = EmotionResNet()
             model.load_state_dict(torch.load(model_path, map_location='cpu'))
             model.eval()
             return model, True
@@ -66,52 +74,104 @@ st.markdown("<h1 class='neural-header' style='font-size: 3.5rem; margin-bottom: 
 with st.sidebar:
     st.image("https://img.icons8.com/nolan/128/brain.png", width=60)
     st.title("Neural Engine")
-    st.markdown(f"<span class='badge'>{'VGG19 ACTIVE' if is_trained else 'MODE: DEMO'}</span>", unsafe_allow_html=True)
+    st.markdown(f"<span class='badge badge-active'>{'RESNET18 ACTIVE' if is_trained else 'MODE: DEMO'}</span>", unsafe_allow_html=True)
     st.markdown("---")
     mode = st.selectbox("Intelligence Stream", ["📷 Multi-Modal Webcam", "🧬 Static Image Analytics", "📊 Diagnostics"])
 
 if mode == "📷 Multi-Modal Webcam":
-    if 'run_camera' not in st.session_state:
-        st.session_state.run_camera = False
+    st.info("💡 **Deployment Note**: If running on Streamlit Cloud, select **Cloud Browser Stream**.")
+    cam_mode = st.radio("Streaming Protocol", ["Cloud Browser Stream (WebRTC)", "Local Hardware Stream (OpenCV)"])
+    
+    if cam_mode == "Cloud Browser Stream (WebRTC)":
+        if WEBRTC_AVAILABLE:
+            class EmotionProcessor(VideoProcessorBase):
+                def __init__(self):
+                    self.detector = get_detector()
+                def recv(self, frame):
+                    img = frame.to_ndarray(format="bgr24")
+                    img = cv2.flip(img, 1)
+                    faces = self.detector.detect_faces(img)
+                    for (x, y, w, h) in faces:
+                        cv2.rectangle(img, (x, y), (x+w, y+h), (79, 172, 254), 2)
+                        if is_trained:
+                            face_roi = img[y:y+h, x:x+w]
+                            input_tensor = preprocess_face(face_roi)
+                            with torch.no_grad():
+                                output = vgg_model(input_tensor)
+                                probs = torch.nn.functional.softmax(output / 1.2, dim=1).cpu().numpy()[0]
+                                top_idx = np.argmax(probs)
+                                emotion = get_emotion_label(top_idx)
+                            cv2.putText(img, f"{emotion} {probs[top_idx]*100:.1f}%", (x, y-15), 
+                                        cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 242, 254), 1)
+                        else:
+                            cv2.putText(img, "DETECTION", (x, y-15), cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 1)
+                    return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-    c1, c2 = st.columns(2)
-    if c1.button("Initalize Sensors"): st.session_state.run_camera = True
-    if c2.button("Terminate Feed"): 
-        st.session_state.run_camera = False
-        st.rerun()
+            st.markdown("### 📡 Secure Web Stream")
+            RTC_CONFIG = RTCConfiguration({
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                    {"urls": ["stun:stun2.l.google.com:19302"]},
+                    {"urls": ["stun:stun3.l.google.com:19302"]},
+                    {"urls": ["stun:stun4.l.google.com:19302"]},
+                ]
+            })
+            webrtc_streamer(
+                key="emotion-recognition",
+                rtc_configuration=RTC_CONFIG,
+                video_processor_factory=EmotionProcessor,
+                media_stream_constraints={"video": True, "audio": False},
+                async_processing=True,
+            )
+        else:
+            st.error("⚠️ `streamlit-webrtc` is not installed! Run `pip install streamlit-webrtc av` to use Cloud mode.")
+    
+    else:
+        if 'run_camera' not in st.session_state:
+            st.session_state.run_camera = False
 
-    frame_placeholder = st.empty()
-    chart_placeholder = st.empty()
+        c1, c2 = st.columns(2)
+        if c1.button("Initalize Sensors"): st.session_state.run_camera = True
+        if c2.button("Terminate Feed"): 
+            st.session_state.run_camera = False
+            st.rerun()
 
-    if st.session_state.run_camera:
-        detector = get_detector()
-        cap = cv2.VideoCapture(0)
-        
-        while st.session_state.run_camera:
-            ret, frame = cap.read()
-            if not ret: break
-            frame = cv2.flip(frame, 1)
+        frame_placeholder = st.empty()
+
+        if st.session_state.run_camera:
+            detector = get_detector()
+            cap = cv2.VideoCapture(0)
             
-            faces = detector.detect_faces(frame)
-            for (x, y, w, h) in faces:
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (79, 172, 254), 2)
+            while st.session_state.run_camera:
+                ret, frame = cap.read()
+                if not ret: break
+                frame = cv2.flip(frame, 1)
                 
-                if is_trained:
-                    face_roi = frame[y:y+h, x:x+w]
-                    input_tensor = preprocess_face(face_roi)
-                    with torch.no_grad():
-                        output = vgg_model(input_tensor)
-                        probs = torch.nn.functional.softmax(output, dim=1).cpu().numpy()[0]
-                        top_idx = np.argmax(probs)
-                        emotion = get_emotion_label(top_idx)
-                        cv2.putText(frame, f"{emotion} {probs[top_idx]*100:.1f}%", (x, y-15), 
-                                    cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 242, 254), 1)
-                else:
-                    cv2.putText(frame, "DETECTION MODE", (x, y-15), 
-                                cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 1)
+                faces = detector.detect_faces(frame)
+                for (x, y, w, h) in faces:
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (79, 172, 254), 2)
+                    
+                    if is_trained:
+                        face_roi = frame[y:y+h, x:x+w]
+                        input_tensor = preprocess_face(face_roi)
+                        with torch.no_grad():
+                            output = vgg_model(input_tensor)
+                            probs = torch.nn.functional.softmax(output / 1.2, dim=1).cpu().numpy()[0]
+                            top_idx = np.argmax(probs)
+                            emotion = get_emotion_label(top_idx)
+                            cv2.putText(frame, f"{emotion} {probs[top_idx]*100:.1f}%", (x, y-15), 
+                                        cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 242, 254), 1)
+                    else:
+                        cv2.putText(frame, "DETECTION MODE", (x, y-15), 
+                                    cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 1)
 
-            frame_placeholder.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
-        cap.release()
+                try:
+                    frame_placeholder.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
+                except:
+                    # Fallback for older Streamlit versions
+                    frame_placeholder.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
+            cap.release()
 
 elif mode == "🧬 Static Image Analytics":
     file = st.file_uploader("Upload Profile", type=['jpg','png','jpeg'])
@@ -121,16 +181,28 @@ elif mode == "🧬 Static Image Analytics":
         if st.button("ANALYSIS"):
             img_np = np.array(img.convert('RGB'))
             faces = get_detector().detect_faces(img_np)
+            
             if len(faces) > 0:
                 (x,y,w,h) = faces[0]
                 face_roi = img_np[y:y+h, x:x+w]
-                input_tensor = preprocess_face(face_roi)
-                with torch.no_grad():
-                    output = vgg_model(input_tensor)
-                    probs = torch.nn.functional.softmax(output, dim=1).cpu().numpy()[0]
-                    res = get_emotion_label(np.argmax(probs))
-                st.subheader(f"Detection: {res}")
-                st.bar_chart(probs)
+            else:
+                st.warning("⚠️ Auto-Focus failed to detect face bounds. Running neural analysis on the full image...")
+                face_roi = img_np
+                
+            input_tensor = preprocess_face(face_roi)
+            with torch.no_grad():
+                output = vgg_model(input_tensor)
+                # Temperature Calibration for confident predictions
+                probs = torch.nn.functional.softmax(output / 1.2, dim=1).cpu().numpy()[0]
+                res = get_emotion_label(np.argmax(probs))
+            
+            st.subheader(f"Detection: {res}")
+            
+            # Format bar chart properly
+            import pandas as pd
+            emotions = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
+            df_probs = pd.DataFrame({"Confidence": probs * 100}, index=emotions)
+            st.bar_chart(df_probs)
 
 elif mode == "📊 Diagnostics":
     process = psutil.Process(os.getpid())
