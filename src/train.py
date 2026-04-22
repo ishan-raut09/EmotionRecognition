@@ -75,7 +75,7 @@ def train():
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    model = EmotionResNet().to(device)
+    model = EmotionResNet(pretrained=True).to(device)
     
     for param in model.parameters():
         param.requires_grad = False

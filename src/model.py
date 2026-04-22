@@ -8,10 +8,15 @@ class EmotionResNet(nn.Module):
     State-of-the-art Transfer Learning Architecture for FER2013.
     Uses Pretrained ResNet18 as a feature extractor.
     """
-    def __init__(self, num_classes=7):
+    def __init__(self, num_classes=7, pretrained=False):
         super(EmotionResNet, self).__init__()
         # Load Pretrained ResNet18
-        self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
+        if pretrained:
+            weights = ResNet18_Weights.DEFAULT
+        else:
+            weights = None
+            
+        self.model = resnet18(weights=weights)
         
         # Replace the final fully connected layer and inject Dropout
         num_ftrs = self.model.fc.in_features

@@ -130,11 +130,13 @@ def load_vgg_engine():
     model_path = "models/emotion_model.pth"
     if os.path.exists(model_path):
         try:
-            model = EmotionResNet()
+            model = EmotionResNet(pretrained=False)
             model.load_state_dict(torch.load(model_path, map_location='cpu'))
             model.eval()
             return model, True
-        except: return None, False
+        except Exception as e: 
+            st.error(f"Error loading model: {e}")
+            return None, False
     return None, False
 
 vgg_model, is_trained = load_vgg_engine()
