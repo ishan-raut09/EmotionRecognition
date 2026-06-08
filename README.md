@@ -53,3 +53,23 @@ python -m src.train
 ```
 
 The best model is saved to `models/emotion_model.pth`.
+
+The training script now uses the official FER2013 split: `Training` for fitting, `PublicTest` for validation, and `PrivateTest` for final testing. It also uses balanced sampling, focal loss, stronger augmentation, AdamW fine-tuning, mixed precision on CUDA, and horizontal-flip test-time augmentation.
+
+Useful options:
+
+```powershell
+python -m src.train --image-size 224 --batch-size 64 --epochs 40 --patience 8
+```
+
+If training is too slow on CPU, reduce the image size:
+
+```powershell
+python -m src.train --image-size 96 --batch-size 64
+```
+
+For best accuracy, keep pretrained ImageNet weights enabled. If your environment cannot download or use cached torchvision weights, run:
+
+```powershell
+python -m src.train --no-pretrained
+```

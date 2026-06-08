@@ -9,12 +9,11 @@ IMG_SIZE = 48
 # ImageNet Standard Normalization (Required for Pretrained ResNet)
 emotion_transform = transforms.Compose([
     transforms.ToPILImage(),
-    transforms.Resize((48, 48)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-def preprocess_face(face_image, color_space="BGR"):
+def preprocess_face(face_image, color_space="BGR", image_size=IMG_SIZE):
     """Prepare a detected face for the ResNet emotion classifier."""
     if face_image is None or face_image.size == 0:
         raise ValueError("Cannot preprocess an empty face image.")
@@ -30,7 +29,7 @@ def preprocess_face(face_image, color_space="BGR"):
     elif face_image.shape[2] == 3 and color_space == "BGR":
         face_image = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
         
-    face_image = cv2.resize(face_image, (48, 48))
+    face_image = cv2.resize(face_image, (image_size, image_size))
     img_tensor = emotion_transform(face_image)
     return img_tensor.unsqueeze(0)
 

@@ -24,6 +24,8 @@ except ImportError:
 
 EMOTIONS = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
 MODEL_PATH = "models/emotion_model.pth"
+DEFAULT_IMAGE_SIZE = 48
+DEFAULT_TEMPERATURE = 1.2
 
 
 if "start_time" not in st.session_state:
@@ -131,16 +133,30 @@ st.markdown(
 @st.cache_resource
 def load_emotion_model():
     if not os.path.exists(MODEL_PATH):
-        return None, False, f"Model file not found at {MODEL_PATH}."
+        return None, False, DEFAULT_IMAGE_SIZE, DEFAULT_TEMPERATURE, f"Model file not found at {MODEL_PATH}."
 
     try:
         model = EmotionResNet(pretrained=False)
-        state_dict = torch.load(MODEL_PATH, map_location="cpu")
+        checkpoint = torch.load(MODEL_PATH, map_location="cpu")
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+            image_size = int(checkpoint.get("image_size", DEFAULT_IMAGE_SIZE))
+            temperature = float(checkpoint.get("temperature", DEFAULT_TEMPERATURE))
+            best_acc = checkpoint.get("best_val_acc")
+            status = "Model loaded successfully."
+            if best_acc is not None:
+                status = f"Model loaded successfully. Best validation accuracy: {best_acc:.2f}%."
+        else:
+            state_dict = checkpoint
+            image_size = DEFAULT_IMAGE_SIZE
+            temperature = DEFAULT_TEMPERATURE
+            status = "Model loaded successfully."
+
         model.load_state_dict(state_dict)
         model.eval()
-        return model, True, "Model loaded successfully."
+        return model, True, image_size, temperature, status
     except Exception as exc:
-        return None, False, f"Error loading model: {exc}"
+        return None, False, DEFAULT_IMAGE_SIZE, DEFAULT_TEMPERATURE, f"Error loading model: {exc}"
 
 
 @st.cache_resource
@@ -152,10 +168,10 @@ def predict_emotion(face_roi, color_space="BGR"):
     if not is_trained or emotion_model is None:
         return None, None
 
-    input_tensor = preprocess_face(face_roi, color_space=color_space)
+    input_tensor = preprocess_face(face_roi, color_space=color_space, image_size=model_image_size)
     with torch.no_grad():
         output = emotion_model(input_tensor)
-        probs = torch.nn.functional.softmax(output / 1.2, dim=1).cpu().numpy()[0]
+        probs = torch.nn.functional.softmax(output / model_temperature, dim=1).cpu().numpy()[0]
 
     top_idx = int(np.argmax(probs))
     return get_emotion_label(top_idx), probs
@@ -186,7 +202,7 @@ def annotate_frame(frame, detector, color_space="BGR"):
     return frame, faces
 
 
-emotion_model, is_trained, model_status = load_emotion_model()
+emotion_model, is_trained, model_image_size, model_temperature, model_status = load_emotion_model()
 
 st.markdown("<h1 class='main-title'>Sentira Intelligence</h1>", unsafe_allow_html=True)
 st.markdown("<p class='subtitle'>Real-time facial emotion recognition</p>", unsafe_allow_html=True)
@@ -333,5 +349,6 @@ elif mode == "System Info":
     c1.metric("Memory Usage", f"{mem_mb:.1f} MB")
     c2.metric("Session Uptime", str(uptime).split(".")[0])
     c3.metric("Compute Backend", "CUDA (GPU)" if torch.cuda.is_available() else "CPU")
+    st.metric("Model Input Size", f"{model_image_size} x {model_image_size}")
     st.caption(model_status)
     st.markdown("</div>", unsafe_allow_html=True)
