@@ -100,7 +100,7 @@ def train():
 
     for epoch in range(epochs):
         if epoch == 5:
-            print("🔓 Unfreezing ResNet Backbone for deep fine-tuning...")
+            print("Unfreezing ResNet backbone for deep fine-tuning...")
             for param in model.parameters():
                 param.requires_grad = True
             # 2. Lower LR on unfreeze to protect pretrained features
@@ -141,20 +141,20 @@ def train():
                 val_correct += predicted.eq(labels).sum().item()
         
         val_acc = 100. * val_correct / val_total
-        print(f"📊 Epoch {epoch+1} Summary: Val Acc: {val_acc:.2f}%")
+        print(f"Epoch {epoch+1} Summary: Val Acc: {val_acc:.2f}%")
         
         scheduler.step() 
 
         if val_acc > best_acc:
             best_acc = val_acc
             patience_counter = 0
-            print(f"🌟 New best accuracy: {val_acc:.2f}%! Saving...")
+            print(f"New best accuracy: {val_acc:.2f}%! Saving...")
             torch.save(model.state_dict(), save_path)
         else:
             patience_counter += 1
-            print(f"⚠️ No improvement. Patience: {patience_counter}/{patience}")
+            print(f"No improvement. Patience: {patience_counter}/{patience}")
             if patience_counter >= patience:
-                print(f"🛑 Early stopping triggered. Model converged at {best_acc:.2f}% validation accuracy.")
+                print(f"Early stopping triggered. Model converged at {best_acc:.2f}% validation accuracy.")
                 break
 
 if __name__ == "__main__":

@@ -1,68 +1,55 @@
-# 🎭 Deep Learning-Based Facial Emotion Recognition System
+# Sentira Emotion Recognition
 
-## 1. 📌 Project Overview
-**Project Title:** Real-Time Facial Emotion Recognition using Deep Learning (CNN)
-**Objective:** To design and implement a system that detects human facial expressions from images or live video streams and classifies them into predefined emotional categories using deep learning techniques.
+Sentira is a Streamlit application for facial emotion recognition from uploaded images or a live webcam stream. It detects faces with OpenCV Haar cascades and classifies expressions with a PyTorch ResNet18 model trained for the FER2013 emotion classes.
 
----
+## Emotion Classes
 
-## 2. 🎯 Problem Statement
-Develop a deep learning model that:
-- Takes a facial image as input
-- Processes it using CNN
-- Outputs the predicted emotion among 7 classes:
-  - **Angry**, **Disgust**, **Fear**, **Happy**, **Sad**, **Surprise**, **Neutral**
+- Angry
+- Disgust
+- Fear
+- Happy
+- Sad
+- Surprise
+- Neutral
 
----
+## Project Structure
 
-## 3. 📊 Dataset Details
-**Dataset:** FER2013 (Kaggle)
-- **Characteristics:** 35,000+ grayscale images (48×48 pixels)
-- **Data Split:**
-  - Training: ~28,000 images
-  - Validation: ~3,500 images
-  - Testing: ~3,500 images
+```text
+app.py                 Streamlit application
+src/model.py           ResNet18 and legacy VGG model definitions
+src/utils.py           Face detection and preprocessing helpers
+src/train.py           FER2013 training script
+models/emotion_model.pth
+data/fer2013.csv
+```
 
----
+## Setup
 
-## 4. ⚙️ System Architecture & Workflow
-1. **Input Image / Video Stream**
-2. **Face Detection** (OpenCV Haar Cascade)
-3. **Image Preprocessing**
-4. **CNN Model Prediction**
-5. **Emotion Output Display**
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
----
+## Run the App
 
-## 5. 🏗️ Methodology
-### 5.1 Data Preprocessing
-- Normalize pixel values (0–255 → 0–1)
-- Resize images to 48×48
-- Convert to tensor format
-- One-hot encoding of labels
+```powershell
+streamlit run app.py
+```
 
-### 5.2 Model Development (CNN)
-- **Layers:** Convolution + ReLU → Max Pooling → Dropout → Fully Connected Layers → Softmax output layer.
+The app supports two webcam modes:
 
-### 5.3 Training Strategy
-- **Loss Function:** Categorical Crossentropy
-- **Optimizer:** Adam
-- **Epochs:** 25–50
-- **Batch Size:** 32/64
+- Cloud WebRTC: works better for deployed Streamlit apps.
+- Local OpenCV: useful when running on your own machine.
 
----
+If `models/emotion_model.pth` is unavailable or cannot be loaded, the app switches to demo mode and still performs face detection without emotion predictions.
 
-## 6. 💻 Technology Stack
-| Component | Technology |
-|---|---|
-| Programming | Python |
-| Deep Learning | PyTorch / TensorFlow |
-| Image Processing | OpenCV |
-| Visualization | Matplotlib / Seaborn |
-| Deployment | Streamlit / Flask |
+## Train the Model
 
----
+Place the FER2013 CSV at `data/fer2013.csv`, then run:
 
-## 🚀 Getting Started
-1. Install dependencies: `pip install -r requirements.txt`
-2. Run the application: `streamlit run app.py`
+```powershell
+python -m src.train
+```
+
+The best model is saved to `models/emotion_model.pth`.
